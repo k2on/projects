@@ -1,19 +1,20 @@
 import {
-    makeFunctionsFromString,
+    makeFunctionsFromStr,
     makeFunctionFromLine,
     makeFunctionFromLineAnon,
+    makeFunctionFromLineKeyword,
 } from "../src/main";
 import { makeUtilFunc } from "../src/util";
 
-describe("makeFunctionsFromFileContent", () => {
+describe("makeFunctionsFromString", () => {
     it("empty string should have no function objects", () => {
-        expect(makeFunctionsFromString("")).toStrictEqual([]);
+        expect(makeFunctionsFromStr("")).toStrictEqual([]);
     });
 
     it("should return single add function", () => {
         const fileContent = "export const add = (l, r) => l + r;\n";
         const expectedFunctions = [makeUtilFunc("add")];
-        expect(makeFunctionsFromString(fileContent)).toStrictEqual(
+        expect(makeFunctionsFromStr(fileContent)).toStrictEqual(
             expectedFunctions,
         );
     });
@@ -38,12 +39,33 @@ describe("makeFunctionFromLine", () => {
             makeFunctionFromLine("export const myFunc = async () => {}"),
         ).toStrictEqual(makeUtilFunc("myFunc"));
     });
+
+    it("keyword function should return func obj", () => {
+        expect(makeFunctionFromLine("export function fn() {}")).toStrictEqual(
+            makeUtilFunc("fn"),
+        );
+        expect(
+            makeFunctionFromLine("export async function fn() {}"),
+        ).toStrictEqual(makeUtilFunc("fn"));
+    });
+
+    it("constants should return null", () => {
+        expect(makeFunctionFromLine('export const FIZZ = "buzz"')).toBeNull();
+    });
 });
 
 describe("makeFunctionFromLineAnon", () => {
     it("single line anon function should return func obj", () => {
         expect(
             makeFunctionFromLineAnon("export const fn = () => {}"),
+        ).toStrictEqual(makeUtilFunc("fn"));
+    });
+});
+
+describe("makeFunctionFromLineKeyword", () => {
+    it("single line function should return func obj", () => {
+        expect(
+            makeFunctionFromLineKeyword("export function fn() {}"),
         ).toStrictEqual(makeUtilFunc("fn"));
     });
 });
