@@ -3,7 +3,7 @@ import {
     makeUtilFunc,
     strBetween,
     removeNull,
-} from "../src/parse/util";
+} from "../../src/parse/util";
 
 describe("splitLines", () => {
     it("empty str should return array of single empty string", () => {
