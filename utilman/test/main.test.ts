@@ -18,6 +18,24 @@ describe("makeFunctionsFromString", () => {
             expectedFunctions,
         );
     });
+
+    it("two anon single line funcs should return two func objs", () => {
+        const fileContent =
+            "export const foo = () => {}\nexport const bar = () => {}";
+        const expectedFunctions = [makeUtilFunc("foo"), makeUtilFunc("bar")];
+        expect(makeFunctionsFromStr(fileContent)).toStrictEqual(
+            expectedFunctions,
+        );
+    });
+
+    it("two keyword single line funcs should return two func objs", () => {
+        const fileContent =
+            "export function foo() {}\nexport function bar () {}";
+        const expectedFunctions = [makeUtilFunc("foo"), makeUtilFunc("bar")];
+        expect(makeFunctionsFromStr(fileContent)).toStrictEqual(
+            expectedFunctions,
+        );
+    });
 });
 
 describe("makeFunctionFromLine", () => {
@@ -66,6 +84,9 @@ describe("makeFunctionFromLineKeyword", () => {
     it("single line function should return func obj", () => {
         expect(
             makeFunctionFromLineKeyword("export function fn() {}"),
+        ).toStrictEqual(makeUtilFunc("fn"));
+        expect(
+            makeFunctionFromLineKeyword("export function fn () {}"),
         ).toStrictEqual(makeUtilFunc("fn"));
     });
 });

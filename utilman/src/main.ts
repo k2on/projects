@@ -23,11 +23,11 @@ const isLineAnonFn = (line: string) => line.match(REGEX_FN_ANON);
 const isLineKeywordFn = (line: string) => line.match(REGEX_FN_KEYWORD);
 
 export const makeFunctionFromLineAnon = (line: string): UtilFunc => {
-    const fnName = strBetween(line, "export const ", " = ");
+    const fnName = strBetween(line, "export const ", " = ").trim();
     return makeUtilFunc(fnName);
 };
 
 export const makeFunctionFromLineKeyword = (line: string): UtilFunc => {
-    const fnName = strBetween(line, " function ", "(");
+    const fnName = strBetween(line, " function ", "(").trim();
     return makeUtilFunc(fnName);
 };
