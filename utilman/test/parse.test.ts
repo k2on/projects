@@ -3,8 +3,8 @@ import {
     makeFunctionFromLine,
     makeFunctionFromLineAnon,
     makeFunctionFromLineKeyword,
-} from "../src/main";
-import { makeUtilFunc } from "../src/util";
+} from "../src/parse";
+import { makeUtilFunc } from "../src/parse/util";
 
 describe("makeFunctionsFromString", () => {
     it("empty string should have no function objects", () => {

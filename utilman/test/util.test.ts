@@ -1,4 +1,9 @@
-import { splitLines, makeUtilFunc, strBetween, removeNull } from "../src/util";
+import {
+    splitLines,
+    makeUtilFunc,
+    strBetween,
+    removeNull,
+} from "../src/parse/util";
 
 describe("splitLines", () => {
     it("empty str should return array of single empty string", () => {
