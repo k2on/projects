@@ -1,10 +1,20 @@
 module messenger
 
-go 1.13
+go 1.18
 
 require (
-	github.com/alexdavid/sigma v0.0.0-20200316011951-d6c08571a90a
-	github.com/gdamore/tcell v1.4.0 // indirect
-	github.com/gdamore/tcell/v2 v2.5.0 // indirect
-	github.com/rivo/tview v0.0.0-20220307222120-9994674d60a8 // indirect
+	github.com/gdamore/tcell/v2 v2.5.0
+	github.com/k2on/sigma v0.0.0-20220406233132-6b29e5f21d03
+	github.com/rivo/tview v0.0.0-20220307222120-9994674d60a8
+)
+
+require (
+	github.com/gdamore/encoding v1.0.0 // indirect
+	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
+	github.com/mattn/go-runewidth v0.0.13 // indirect
+	github.com/mattn/go-sqlite3 v1.11.1-0.20191105054421-67c1376b46fb // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
+	golang.org/x/sys v0.0.0-20220318055525-2edf467146b5 // indirect
+	golang.org/x/term v0.0.0-20210220032956-6a3ed077a48d // indirect
+	golang.org/x/text v0.3.7 // indirect
 )

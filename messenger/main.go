@@ -1,29 +1,106 @@
 package main
 
 import (
-	// "fmt"
+	"bytes"
+	"os/exec"
+	"strconv"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/k2on/sigma"
 	"github.com/rivo/tview"
 )
 
-// client, err := sigma.NewClient()
-// if err != nil { panic(err) }
+type Conversation struct {
+	id    int
+	label string
+}
 
-// chats, err := client.Chats()
-// if err != nil { panic(err) }
+type Message struct {
+	body string
+	from string
+}
 
-// chats, err := client.Messages(22, sigma.MessageFilter{Limit: 50})
-// if err != nil { panic(err) }
+const CONTACTS_COMMAND = "/usr/local/bin/format-abook"
 
-// for _, chat := range chats {
-// fmt.Println(chat)
-// }
+func getContacts() string {
+	cmd := exec.Command(CONTACTS_COMMAND)
+	
+	var out bytes.Buffer
+	cmd.Stdout = &out
 
-const RUNE_LEFT  = 'h'
-const RUNE_DOWN  = 'j'
-const RUNE_UP    = 'k'
-const RUNE_RIGHT = 'l'
+	err := cmd.Run()
+	if err != nil { panic(err) }
+
+	return out.String()
+}
+
+func getConversations(client sigma.Client) []Conversation {
+	chats, err := client.Chats()
+	if err != nil { panic(err) }
+
+	contacts := getContacts()
+
+	getContactName := func (id string) string {
+		for _, line := range strings.Split(contacts, "\n") {
+			if len(line) == 0 { continue }
+			lineParts := strings.Split(line, "=")
+			ide := lineParts[0]
+			val := lineParts[1]
+			if ide == id { return val }
+		}
+		return id
+	}
+
+	conversations := []Conversation{} 
+	
+	for _, chat := range chats {
+
+		label := getContactName(chat.DisplayName)
+		if chat.IsGroupChat {
+			label = "(GC) " + label
+		}
+		conversations = append(conversations, Conversation{chat.ID, label})
+	}
+
+	return conversations
+}
+
+func getMessagesFromConversation(client sigma.Client, id int) []Message {
+	chats, err := client.Messages(id, sigma.MessageFilter{Limit: 50})
+	if err != nil { panic(err) }
+
+	handles, err := client.Handles()
+	if err != nil { panic(err) }
+
+	getIDFromHandle := func (id string) string {
+		for _, handle := range handles {
+			if strconv.Itoa(handle.ID) == id { return handle.Identifier }
+		}
+		return "unknown"
+	}
+
+	messages := []Message{}
+	for _, chat := range chats {
+		var label string
+		if chat.FromMe {
+			label = "me"
+		} else {
+			label = getIDFromHandle(chat.Account)
+		}
+		messages = append([]Message{{chat.Text, label}}, messages... )
+	}
+	return messages
+}
+
+const DEBUG = true
+
+const RUNE_LEFT   = 'h'
+const RUNE_DOWN   = 'j'
+const RUNE_UP     = 'k'
+const RUNE_RIGHT  = 'l'
+const RUNE_TOP    = 'g'
+const RUNE_BOTTOM = 'G'
 
 func addBindings(list *tview.List, hoverFn func(i int), leftFn func(i int), rightFn func(i int)) {
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -48,6 +125,12 @@ func addBindings(list *tview.List, hoverFn func(i int), leftFn func(i int), righ
 			case event.Rune() == RUNE_LEFT:
 				leftFn(position)
 				return nil
+			
+			case event.Rune() == RUNE_TOP:
+				fn = func (_ int) int { return 0 }
+			
+			case event.Rune() == RUNE_BOTTOM:
+				fn = func (_ int) int { return endPosition }
 
 			default:
 				return nil
@@ -65,38 +148,64 @@ func addBindings(list *tview.List, hoverFn func(i int), leftFn func(i int), righ
 
 func main() {
 
-	m := make(map[int][]string)
-	m[0] = []string{"mes 1", "mes 2"}
-	m[1] = []string{"mes 3", "mes 4"}
-
 	// nP := func(text string) tview.Primitive {
 	// 	return tview.NewTextView().
 	// 		SetTextAlign(tview.AlignCenter).
 	// 		SetText(text)
 	// }
+	client, err := sigma.NewClient()
+	if err != nil { panic(err) }
 
 	app := tview.NewApplication();
 
-	list := tview.NewList().
-		AddItem("List item 1", "", 0, nil).
-		AddItem("List item 2", "", 0, nil).
-		AddItem("List item 3", "", 0, nil).
-		AddItem("List item 4", "", 0, nil)
+
+
+	list := tview.NewList()
+	conversations := getConversations(client)
+
+	for _, converstation := range conversations {
+		list.AddItem(converstation.label, "", 0, nil)
+	}
+
 
 	msg := tview.NewList().
-		AddItem("my message", "", 0, nil).
 		SetSelectedFocusOnly(true)
 		
+	
+		
 	inpt := tview.NewInputField()
+
+	chatId := -1
+
+	inpt.SetDoneFunc(func(key tcell.Key) {
+			if key == tcell.KeyEscape {
+				msg.SetCurrentItem(-1)
+				app.SetFocus(msg)
+			} else if key == tcell.KeyEnter {
+				message := inpt.GetText()
+				msg.AddItem("<me> " + message, "", 0, nil)
+				inpt.SetText("")
+				msg.SetCurrentItem(-1)
+
+				if !DEBUG {
+					client.SendMessage(chatId, message)
+				}
+			}
+		})
+
+	
 
 	addBindings(
 		list,
 		func(newPos int) {
-			msgs := m[newPos]
+			chatId = conversations[newPos].id
+			msgs := getMessagesFromConversation(client, chatId)
 			msg.Clear()
 			for _, message := range msgs {
-				msg.AddItem(message, "", 0, nil)
+				txt := "<" + message.from + "> " + message.body
+				msg.AddItem(txt, "", 0, nil)
 			}
+			msg.SetCurrentItem(-1)
 		},
 		func(_ int) {
 			app.Stop()
