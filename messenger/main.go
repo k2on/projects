@@ -21,10 +21,23 @@ type Message struct {
 	from string
 }
 
-const CONTACTS_COMMAND = "/usr/local/bin/format-abook"
+type Client interface {
+	GetContactName(identifier string) string
 
-func getContacts() string {
-	cmd := exec.Command(CONTACTS_COMMAND)
+	GetConversations() ([]Conversation, error)
+
+	GetConversationMessages(id int) ([]Message, error)
+}
+
+type realClient struct {
+	config Config
+	contacts string
+	sigmaClient sigma.Client
+	handles []sigma.Handle
+}
+
+func PipeCommand(in string, command string) string {
+	cmd := exec.Command("/bin/sh", "-c", "echo " + in + " | " + command)
 	
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -35,62 +48,100 @@ func getContacts() string {
 	return out.String()
 }
 
-func getConversations(client sigma.Client) []Conversation {
-	chats, err := client.Chats()
+func RunCommand(command string) string {
+	cmd := exec.Command(command)
+	
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err := cmd.Run()
 	if err != nil { panic(err) }
 
-	contacts := getContacts()
-
-	getContactName := func (id string) string {
-		for _, line := range strings.Split(contacts, "\n") {
-			if len(line) == 0 { continue }
-			lineParts := strings.Split(line, "=")
-			ide := lineParts[0]
-			val := lineParts[1]
-			if ide == id { return val }
-		}
-		return id
-	}
-
-	conversations := []Conversation{} 
-	
-	for _, chat := range chats {
-
-		label := getContactName(chat.DisplayName)
-		if chat.IsGroupChat {
-			label = "(GC) " + label
-		}
-		conversations = append(conversations, Conversation{chat.ID, label})
-	}
-
-	return conversations
+	return out.String()
 }
 
-func getMessagesFromConversation(client sigma.Client, id int) []Message {
-	chats, err := client.Messages(id, sigma.MessageFilter{Limit: 50})
+type Config struct {
+	contacts string
+	nameMessage string
+}
+
+func NewClient(config Config) (Client, error) {
+	contacts := RunCommand(config.contacts)
+	sigmaClient, err := sigma.NewClient()
+	if err != nil { panic(err) }
+	handles, err := sigmaClient.Handles()
 	if err != nil { panic(err) }
 
-	handles, err := client.Handles()
-	if err != nil { panic(err) }
+	return &realClient{
+		config,
+		contacts,
+		sigmaClient,
+		handles,
+	}, nil
+}
 
-	getIDFromHandle := func (id string) string {
-		for _, handle := range handles {
-			if strconv.Itoa(handle.ID) == id { return handle.Identifier }
-		}
-		return "unknown"
+func (client *realClient) GetContactName(phoneOrEmail string) string {
+	contacts := client.contacts
+	lines := strings.Split(contacts, "\n")
+	for _, line := range lines {
+		isLineEmpty := len(line) == 0
+		if isLineEmpty { continue }
+		lineParts := strings.Split(line, "=")
+		id := lineParts[0]
+		value := lineParts[1]
+		if phoneOrEmail == id { return value }
 	}
+	return phoneOrEmail
+}
+
+func (client *realClient) GetIdFromHandle(handle string) string {
+	handles := client.handles
+	for _, handleItem := range handles {
+		if strconv.Itoa(handleItem.ID) == handle { return handleItem.Identifier }
+	}
+	return "unknown"
+}
+
+func (client *realClient) GetConversations() ([]Conversation, error) {
+	chats, err := client.sigmaClient.Chats()
+	if err != nil { return []Conversation{}, err }
+
+	conversations := []Conversation{} 
+
+	for _, chat := range chats {
+		label := client.GetContactName(chat.DisplayName)
+		if chat.IsGroupChat { label = "(GC) " + label }
+		conversations = append(conversations, Conversation{chat.ID, label})
+	}
+	return conversations, nil
+}
+
+func (client *realClient) GetConversationMessages(id int) ([]Message, error) {
+	messagesRaw, err := client.sigmaClient.Messages(id, sigma.MessageFilter{Limit: 50})
+	if err != nil { return []Message{}, err }
+
+	var cachedNames = make(map[string]string)
 
 	messages := []Message{}
-	for _, chat := range chats {
+	for _, chat := range messagesRaw {
 		var label string
 		if chat.FromMe {
-			label = "me"
+			label = "我"
 		} else {
-			label = getIDFromHandle(chat.Account)
+			id := client.GetIdFromHandle(chat.Account)
+			label = client.GetContactName(id) 
+			name, exists := cachedNames[label]
+			if exists {
+				label = name
+			} else {
+				name = PipeCommand(label, client.config.nameMessage)
+				cachedNames[label] = name
+				label = name
+			}
 		}
 		messages = append([]Message{{chat.Text, label}}, messages... )
 	}
-	return messages
+	return messages, nil
 }
 
 const DEBUG = true
@@ -148,12 +199,11 @@ func addBindings(list *tview.List, hoverFn func(i int), leftFn func(i int), righ
 
 func main() {
 
-	// nP := func(text string) tview.Primitive {
-	// 	return tview.NewTextView().
-	// 		SetTextAlign(tview.AlignCenter).
-	// 		SetText(text)
-	// }
-	client, err := sigma.NewClient()
+	config := Config{
+		contacts: "/usr/local/bin/format-abook",
+		nameMessage: "awk '{print $1;}'",
+	}
+	client, err := NewClient(config)
 	if err != nil { panic(err) }
 
 	app := tview.NewApplication();
@@ -161,7 +211,7 @@ func main() {
 
 
 	list := tview.NewList()
-	conversations := getConversations(client)
+	conversations, err := client.GetConversations()
 
 	for _, converstation := range conversations {
 		list.AddItem(converstation.label, "", 0, nil)
@@ -188,7 +238,7 @@ func main() {
 				msg.SetCurrentItem(-1)
 
 				if !DEBUG {
-					client.SendMessage(chatId, message)
+					// client.SendMessage(chatId, message)
 				}
 			}
 		})
@@ -199,10 +249,23 @@ func main() {
 		list,
 		func(newPos int) {
 			chatId = conversations[newPos].id
-			msgs := getMessagesFromConversation(client, chatId)
+			msgs, err := client.GetConversationMessages(chatId)
+			if err != nil { panic(err) }
+
 			msg.Clear()
+
+			longestName := 0
+
+			for _, msg := range msgs {
+				length := len(msg.from)
+				if length > longestName { longestName = length }
+			}
+
 			for _, message := range msgs {
-				txt := "<" + message.from + "> " + message.body
+				nameSizeDiff :=  longestName - (len(message.from))
+				padding := strings.Repeat(" ", nameSizeDiff)
+
+				txt := padding + message.from + " : " + message.body
 				msg.AddItem(txt, "", 0, nil)
 			}
 			msg.SetCurrentItem(-1)
