@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -17,8 +18,12 @@ type Conversation struct {
 }
 
 type Message struct {
-	body string
-	from string
+	id          string
+	parentId    string
+	messageType string
+	body        string
+	from        string
+	reaction    string
 }
 
 type Client interface {
@@ -61,8 +66,14 @@ func RunCommand(command string) string {
 }
 
 type Config struct {
-	contacts string
-	nameMessage string
+	contacts         string
+	nameMessage      string
+	reactionLove     string
+	reactionLike     string
+	reactionDislike  string
+	reactionLaugh    string
+	reactionEmphasis string
+	reactionQuestion string
 }
 
 func NewClient(config Config) (Client, error) {
@@ -124,6 +135,32 @@ func (client *realClient) GetConversationMessages(id int) ([]Message, error) {
 
 	messages := []Message{}
 	for _, chat := range messagesRaw {
+		if chat.Type != 0 { 
+			reaction := "?"
+			switch {
+				case chat.Type == REACTION_ADD_LOVE:
+					reaction = client.config.reactionLove
+				case chat.Type == REACTION_ADD_LIKE:
+					reaction = client.config.reactionLike
+				case chat.Type == REACTION_ADD_DISLIKE:
+					reaction = client.config.reactionDislike
+				case chat.Type == REACTION_ADD_LAUGH:
+					reaction = client.config.reactionLaugh
+				case chat.Type == REACTION_ADD_EMPHASIS:
+					reaction = client.config.reactionEmphasis
+				case chat.Type == REACTION_ADD_QUESTION:
+					reaction = client.config.reactionQuestion
+			}
+			messages = append([]Message{{
+				chat.Guid,
+				chat.ParentId,
+				"reaction",
+				"",
+				"",
+				reaction,
+			}}, messages...)
+			continue
+		}
 		var label string
 		if chat.FromMe {
 			label = "我"
@@ -139,7 +176,14 @@ func (client *realClient) GetConversationMessages(id int) ([]Message, error) {
 				label = name
 			}
 		}
-		messages = append([]Message{{chat.Text, label}}, messages... )
+		messages = append([]Message{{
+			chat.Guid,
+			"",
+			"text",
+			chat.Text,
+			label,
+			"",
+		}}, messages... )
 	}
 	return messages, nil
 }
@@ -152,6 +196,20 @@ const RUNE_UP     = 'k'
 const RUNE_RIGHT  = 'l'
 const RUNE_TOP    = 'g'
 const RUNE_BOTTOM = 'G'
+
+const REACTION_ADD_LOVE     = 2000
+const REACTION_ADD_LIKE     = 2001
+const REACTION_ADD_DISLIKE  = 2002
+const REACTION_ADD_LAUGH    = 2003
+const REACTION_ADD_EMPHASIS = 2004
+const REACTION_ADD_QUESTION = 2005
+
+const REACTION_REMOVE_LOVE     = 3000
+const REACTION_REMOVE_LIKE     = 3001
+const REACTION_REMOVE_DISLIKE  = 3002
+const REACTION_REMOVE_LAUGH    = 3003
+const REACTION_REMOVE_EMPHASIS = 3004
+const REACTION_REMOVE_QUESTION = 3005
 
 func addBindings(list *tview.List, hoverFn func(i int), leftFn func(i int), rightFn func(i int)) {
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -195,13 +253,40 @@ func addBindings(list *tview.List, hoverFn func(i int), leftFn func(i int), righ
 		})
 
 }
+func Map(vs []string, f func(string) string) []string {
+    vsm := make([]string, len(vs))
+    for i, v := range vs {
+        vsm[i] = f(v)
+    }
+    return vsm
+}
 
+func reactionsFormat(reactions []Message) string {
+	if len(reactions) == 0 { return "" }
+
+	var reactionsFormatted []string
+
+	for _, reaction := range reactions {
+		reactionsFormatted = append(reactionsFormatted, reaction.reaction)
+	}
+
+	emojis := strings.Join(reactionsFormatted, " ")
+
+	return fmt.Sprintf("[%s]", emojis)
+	
+}
 
 func main() {
 
 	config := Config{
 		contacts: "/usr/local/bin/format-abook",
 		nameMessage: "awk '{print $1;}'",
+		reactionLove: "💕",
+		reactionLike: "👍",
+		reactionDislike: "👎",
+		reactionLaugh: "🤣",
+		reactionEmphasis: "❗",
+		reactionQuestion: "❓",
 	}
 	client, err := NewClient(config)
 	if err != nil { panic(err) }
@@ -255,17 +340,39 @@ func main() {
 			msg.Clear()
 
 			longestName := 0
+			var childrenMap = make(map[string][]Message)
 
 			for _, msg := range msgs {
 				length := len(msg.from)
 				if length > longestName { longestName = length }
+
+				// parentId := msg.parentId
+				parentId := strings.Replace(msg.parentId, "p:0/", "", 1)
+				// fmt.Println(parentId)
+				if parentId != "" {
+					_, exists := childrenMap[parentId]
+					if !exists {
+						childrenMap[parentId] = []Message{}
+					}
+					childrenMap[parentId] = append(childrenMap[parentId], msg)
+
+				}
+
+
 			}
 
+
+
 			for _, message := range msgs {
+				if message.messageType != "text" { continue }
+
 				nameSizeDiff :=  longestName - (len(message.from))
 				padding := strings.Repeat(" ", nameSizeDiff)
 
-				txt := padding + message.from + " : " + message.body
+				// fmt.Println(message.id)
+				reactions := reactionsFormat(childrenMap[message.id])
+
+				txt := padding + message.from + " : " + message.body + " " + reactions
 				msg.AddItem(txt, "", 0, nil)
 			}
 			msg.SetCurrentItem(-1)
