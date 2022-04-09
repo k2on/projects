@@ -26,6 +26,7 @@ type Message struct {
 	from        string
 	reaction    string
 	timestamp   time.Time
+	fromMe      bool
 }
 
 type Client interface {
@@ -39,6 +40,7 @@ type Client interface {
 type realClient struct {
 	config Config
 	contacts string
+	groups string
 	sigmaClient sigma.Client
 	handles []sigma.Handle
 }
@@ -69,6 +71,8 @@ func RunCommand(command string) string {
 
 type Config struct {
 	contacts         string
+	groups           string
+	groupScript      string
 	nameMessage      string
 	reactionLove     string
 	reactionLike     string
@@ -82,6 +86,7 @@ type Config struct {
 
 func NewClient(config Config) (Client, error) {
 	contacts := RunCommand(config.contacts)
+	groups := RunCommand(config.groups)
 	sigmaClient, err := sigma.NewClient()
 	if err != nil { panic(err) }
 	handles, err := sigmaClient.Handles()
@@ -90,14 +95,19 @@ func NewClient(config Config) (Client, error) {
 	return &realClient{
 		config,
 		contacts,
+		groups,
 		sigmaClient,
 		handles,
 	}, nil
 }
 
+func Lines(str string) []string {
+	return strings.Split(str, "\n")
+}
+
 func (client *realClient) GetContactName(phoneOrEmail string) string {
 	contacts := client.contacts
-	lines := strings.Split(contacts, "\n")
+	lines := Lines(contacts)
 	for _, line := range lines {
 		isLineEmpty := len(line) == 0
 		if isLineEmpty { continue }
@@ -107,6 +117,22 @@ func (client *realClient) GetContactName(phoneOrEmail string) string {
 		if phoneOrEmail == id { return value }
 	}
 	return phoneOrEmail
+}
+
+func (client *realClient) GetContactGroup(name string) string {
+	groups := client.groups
+	lines := Lines(groups)
+	for _, line := range lines {
+		isLineEmpty := len(line) == 0
+		if isLineEmpty { continue }
+		lineParts := strings.Split(line, "=")
+		lineName := lineParts[0]
+		lineGroups := lineParts[1]
+		if lineName == name {
+			return lineGroups
+		}
+	}
+	return ""
 }
 
 func (client *realClient) GetIdFromHandle(handle string) string {
@@ -123,9 +149,21 @@ func (client *realClient) GetConversations() ([]Conversation, error) {
 
 	conversations := []Conversation{} 
 
+	// cache group prefixes
+
 	for _, chat := range chats {
-		label := client.GetContactName(chat.DisplayName)
-		if chat.IsGroupChat { label = "(GC) " + label }
+		name := client.GetContactName(chat.DisplayName)
+		label := name
+
+		if chat.IsGroupChat {
+			label = "[👥] " + name
+		} else {
+			groups := client.GetContactGroup(name)
+			prefix := PipeCommand(groups, client.config.groupScript)
+			label = prefix + name
+		}
+
+
 		conversations = append(conversations, Conversation{chat.ID, label})
 	}
 	return conversations, nil
@@ -163,6 +201,7 @@ func (client *realClient) GetConversationMessages(id int) ([]Message, error) {
 				"",
 				reaction,
 				chat.Time,
+				chat.FromMe,
 			}}, messages...)
 			continue
 		}
@@ -189,6 +228,7 @@ func (client *realClient) GetConversationMessages(id int) ([]Message, error) {
 			label,
 			"",
 			chat.Time,
+			chat.FromMe,
 		}}, messages... )
 	}
 	return messages, nil
@@ -292,13 +332,15 @@ func formatMessageTime(message Message, previosTimestamp time.Time, config Confi
 
 	timeFormatted := message.timestamp.Local().Format(config.timeFormat)
 
-	return " - " + timeFormatted
+	return timeFormatted
 }
 
 func main() {
 
 	config := Config{
 		contacts: "/usr/local/bin/format-abook",
+		groups: "/usr/local/bin/abook-groups",
+		groupScript: "awk 'BEGIN{FS=\",\";OFS=\",\"}{print $1;}' | sed 's/pinned/🎯/;s/family/👪/;s/hs/🐏/;s/maga/🤠/;s/fb/🏈/;s/ff/🔵/;s/ct/❄️/' | echo \"[grey][$(awk '{print $1}')][-] \"",
 		nameMessage: "awk '{print $1;}'",
 		reactionLove: "💕",
 		reactionLike: "👍",
@@ -307,6 +349,7 @@ func main() {
 		reactionEmphasis: "❗",
 		reactionQuestion: "❓",
 		timeThreshold: 60 * 60,
+		// refrence: https://golangbyexample.com/time-date-formatting-in-go/
 		timeFormat: "[grey] Monday - 3pm",
 	}
 	client, err := NewClient(config)
@@ -398,7 +441,10 @@ func main() {
 
 				previousTime= message.timestamp
 
-				txt := padding + message.from + " : " + message.body + " " + reactions + timeFormatted
+				msgColor := ""
+				if message.fromMe { msgColor = "[blue]" }
+
+				txt := padding + message.from + " : " + msgColor + message.body + "[-] " + reactions + timeFormatted
 				msg.AddItem(txt, "", 0, nil)
 			}
 			msg.SetCurrentItem(-1)
