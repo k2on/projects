@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/k2on/sigma"
@@ -24,6 +25,7 @@ type Message struct {
 	body        string
 	from        string
 	reaction    string
+	timestamp   time.Time
 }
 
 type Client interface {
@@ -74,6 +76,8 @@ type Config struct {
 	reactionLaugh    string
 	reactionEmphasis string
 	reactionQuestion string
+	timeThreshold    int64
+	timeFormat       string
 }
 
 func NewClient(config Config) (Client, error) {
@@ -158,6 +162,7 @@ func (client *realClient) GetConversationMessages(id int) ([]Message, error) {
 				"",
 				"",
 				reaction,
+				chat.Time,
 			}}, messages...)
 			continue
 		}
@@ -183,6 +188,7 @@ func (client *realClient) GetConversationMessages(id int) ([]Message, error) {
 			chat.Text,
 			label,
 			"",
+			chat.Time,
 		}}, messages... )
 	}
 	return messages, nil
@@ -276,6 +282,19 @@ func reactionsFormat(reactions []Message) string {
 	
 }
 
+func formatMessageTime(message Message, previosTimestamp time.Time, config Config) string {
+	time := message.timestamp.Unix()
+	previous := previosTimestamp.Unix()
+
+	diff := time - previous
+
+	if diff < config.timeThreshold { return "" }
+
+	timeFormatted := message.timestamp.Local().Format(config.timeFormat)
+
+	return " - " + timeFormatted
+}
+
 func main() {
 
 	config := Config{
@@ -287,6 +306,8 @@ func main() {
 		reactionLaugh: "🤣",
 		reactionEmphasis: "❗",
 		reactionQuestion: "❓",
+		timeThreshold: 60 * 60,
+		timeFormat: "[grey] Monday - 3pm",
 	}
 	client, err := NewClient(config)
 	if err != nil { panic(err) }
@@ -362,6 +383,7 @@ func main() {
 			}
 
 
+			var previousTime time.Time 
 
 			for _, message := range msgs {
 				if message.messageType != "text" { continue }
@@ -372,7 +394,11 @@ func main() {
 				// fmt.Println(message.id)
 				reactions := reactionsFormat(childrenMap[message.id])
 
-				txt := padding + message.from + " : " + message.body + " " + reactions
+				timeFormatted := formatMessageTime(message, previousTime, config)
+
+				previousTime= message.timestamp
+
+				txt := padding + message.from + " : " + message.body + " " + reactions + timeFormatted
 				msg.AddItem(txt, "", 0, nil)
 			}
 			msg.SetCurrentItem(-1)
